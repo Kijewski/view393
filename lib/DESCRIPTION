@@ -1,0 +1,18 @@
+"""\
+View393\n\
+=======\n\
+\n\
+Some helper functions to inspect :class:`str` objects in Python 3.3 and later.\n\
+\n\
+\n\
+Installation\n\
+------------\n\
+\n\
+.. code:: bash\n\
+\n\
+    $ pip install view393\n\
+\n\
+\n\
+Description\n\
+-----------\n\
+"""

@@ -1,0 +1,7 @@
+include LICENSE
+include Makefile
+include requirements.txt
+include view393.cpp
+include view393.pyx
+recursive-include docs **
+recursive-include lib **
