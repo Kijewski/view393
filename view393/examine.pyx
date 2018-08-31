@@ -1,6 +1,9 @@
-def kind(unicode data):
+cpdef Kind kind(unicode data):
     '''
     Returns the "kind" of the input string.
+
+    The function looks-up stored information, so regardless of ``len(data)``
+    it always takes the same time to call this function.
 
     Arguments
     ---------
@@ -19,18 +22,18 @@ def kind(unicode data):
     kind = PyUnicode_KIND(data)
     if kind is PyUnicode_1BYTE_KIND:
         if PyUnicode_IS_ASCII(data):
-            return Kind.ASCII
+            return ASCII
         else:
-            return Kind.UCS1
+            return UCS1
     elif kind is PyUnicode_2BYTE_KIND:
-        return Kind.UCS2
+        return UCS2
     elif kind is PyUnicode_4BYTE_KIND:
-        return Kind.UCS4
+        return UCS4
     else:
         raise SystemError  # impossible
 
 
-def view(unicode data, *, boolean chars=False):
+cpdef view(unicode data, boolean chars=False):
     '''
     Returns a memoryview of the input string.
 
@@ -91,7 +94,7 @@ def view(unicode data, *, boolean chars=False):
     return result
 
 
-def utf8(unicode data):
+cpdef utf8(unicode data):
     '''
     Returns a memoryview of the UTF-8 representation of the input string.
 

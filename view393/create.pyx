@@ -6,21 +6,32 @@ cdef unicode EMPTY_UNICODE = u''
 cdef bytes EMPTY_BYTES = b''
 
 
-ctypedef Py_ssize_t GetFn(void *ptr)
-ctypedef void SetFn(void *ptr, Py_ssize_t value)
+cdef void _set1(void *ptr, Py_ssize_t value) nogil:
+    (<uint8_t*> ptr)[0] = <uint8_t> value
+
+
+cdef Py_ssize_t _get1(void *ptr) nogil:
+    return (<uint8_t*> ptr)[0]
+
+
+cdef void _set2(void *ptr, Py_ssize_t value) nogil:
+    (<uint16_t*> ptr)[0] = <uint16_t> value
+
+
+cdef Py_ssize_t _get2(void *ptr) nogil:
+    return (<uint16_t*> ptr)[0]
+
+
+cdef void _set4(void *ptr, Py_ssize_t value) nogil:
+    (<uint32_t*> ptr)[0] = <uint32_t> value
+
+
+cdef Py_ssize_t _get4(void *ptr) nogil:
+    return (<uint32_t*> ptr)[0]
 
 
 @auto_pickle(False)
 cdef class InplaceBuilder:
-    cdef void *memory
-    cdef readonly Py_ssize_t capacity
-    cdef readonly Py_ssize_t memoryviews
-    cdef readonly Py_ssize_t offset
-    cdef readonly Py_ssize_t itemsize
-    cdef readonly char *format
-    cdef GetFn *_get
-    cdef SetFn *_set
-
     def __cinit__(InplaceBuilder self):
         self.memory = NULL
         self.capacity = 0
@@ -28,8 +39,8 @@ cdef class InplaceBuilder:
         self.offset = 0
         self.itemsize = 0
         self.format = NULL
-        self._get = InplaceBuilder.__get
-        self._set = InplaceBuilder.__set
+        self._get = _get1
+        self._set = _set1
 
     def __dealloc__(InplaceBuilder self):
         cdef void *memory = self.memory
@@ -38,6 +49,14 @@ cdef class InplaceBuilder:
             ObjectRealloc(memory, 0)
 
     cpdef resize(InplaceBuilder self, Py_ssize_t amount):
+        '''
+        Resize the buffer to ``amount`` characters.
+
+        Arguments
+        ---------
+        amount : int
+            New size of the buffer. Clear buffer if <=0.
+        '''
         cdef void *new_ptr
         cdef Py_ssize_t alloc_n
 
@@ -50,7 +69,7 @@ cdef class InplaceBuilder:
         if amount == self.capacity:
             return
 
-        alloc_n = amount + self.offset + self.itemsize
+        alloc_n = self.offset + amount * self.itemsize
         if alloc_n <= amount:
             ErrNoMemory()
 
@@ -61,20 +80,32 @@ cdef class InplaceBuilder:
         self.memory = new_ptr
         self.capacity = amount
 
-    cpdef incr_size(InplaceBuilder self, Py_ssize_t amount):
-        cdef Py_ssize_t new_amount
+    cpdef Py_ssize_t incr_size(InplaceBuilder self, Py_ssize_t amount):
+        '''
+        Resize the buffer by ``amount`` characters.
 
-        if amount == 0:
-            return
+        Arguments
+        ---------
+        amount : int
+            Amount of charactes to grow or shrink the buffer
 
-        new_amount = self.capacity + amount
-        if (
-            ((new_amount > 0) and (new_amount < self.capacity)) or
-            ((new_amount < 0) and (new_amount > self.capacity))
-        ):
-            ErrNoMemory()
+        Returns
+        -------
+        int
+            New size of the buffer in characters.
+        '''
+        cdef Py_ssize_t new_amount = self.capacity + amount
 
-        self.resize(new_amount)
+        if amount != 0:
+            if (
+                ((new_amount > 0) and (new_amount < self.capacity)) or
+                ((new_amount < 0) and (new_amount > self.capacity))
+            ):
+                ErrNoMemory()
+
+            self.resize(new_amount)
+
+        return new_amount
 
     def __getbuffer__(InplaceBuilder self, Py_buffer *info, int flags):
         info.buf = (<char*> self.memory) + self.offset
@@ -94,9 +125,6 @@ cdef class InplaceBuilder:
     def __releasebuffer__(InplaceBuilder self, Py_buffer *info):
         self.memoryviews -= 1
 
-    def release(InplaceBuilder self):
-        raise NotImplementedError
-
     @final
     cdef void *_index_addr(InplaceBuilder self, Py_ssize_t index) except NULL:
         if index < 0:
@@ -106,14 +134,6 @@ cdef class InplaceBuilder:
             raise IndexError
 
         return (<char*> self.memory) + self.offset + (index * self.itemsize)
-
-    @staticmethod
-    cdef void __set(void *ptr, Py_ssize_t value):
-        (<uint8_t*> ptr)[0] = <uint8_t> value
-
-    @staticmethod
-    cdef Py_ssize_t __get(void *ptr):
-        return (<uint8_t*> ptr)[0]
 
     def __getitem__(InplaceBuilder self, index):
         if not PySlice_Check(index):
@@ -132,10 +152,8 @@ cdef class InplaceBuilder:
         else:
             PyObject_SetItem(PyMemoryView_FromObject(self), index, value)
 
-    def is_invalid(InplaceBuilder self):
-        return True
 
-
+@final
 @auto_pickle(False)
 cdef class AsciiBuilder(InplaceBuilder):
     def __cinit__(AsciiBuilder self):
@@ -143,7 +161,22 @@ cdef class AsciiBuilder(InplaceBuilder):
         self.itemsize = 1
         self.format = b'B'
 
-    def release(AsciiBuilder self):
+    cpdef unicode release(AsciiBuilder self):
+        '''
+        Finish the string creation and return the :class:`~str`.
+
+        Warning
+        -------
+            This function does not check the validility of the buffer.
+            If the buffer is not valid, then there may be errors in functions using this string.
+
+            Test :func:`~AsciiBuilder.valid()` if you want to make sure that the data is sane.
+
+        Returns
+        -------
+        str
+            The created ASCII string
+        '''
         cdef object result
         cdef Py_ssize_t length
         cdef PyASCIIObject *ascii
@@ -170,17 +203,23 @@ cdef class AsciiBuilder(InplaceBuilder):
 
         return result
 
-    def is_invalid(AsciiBuilder self):
+    cpdef BuilderValid valid(AsciiBuilder self):
+        '''
+        A :class:`~AsciiBuilder` buffer is valid if it is empty or no data is `>0x7F`.
+        '''
         cdef uint8_t *pos = (<uint8_t*> self.memory) + START_ASCII
         cdef Py_ssize_t index
         cdef uint8_t value
 
+        if (self.capacity == 0) or (self.memory is NULL):
+            return EMPTY
+
         for index in range(self.capacity):
             value = pos[index]
             if value >= 0x80:
-                return f'self[{index}] == {value} is out of ASCII range'
+                return RANGE_EXCEEDED
 
-        return False
+        return VALID
 
 
 @auto_pickle(False)
@@ -188,7 +227,7 @@ cdef class CompactUnicodeBuilder(InplaceBuilder):
     def __cinit__(CompactUnicodeBuilder self):
         self.offset = START_COMPACT
 
-    cdef _release(CompactUnicodeBuilder self):
+    cdef unicode _release(CompactUnicodeBuilder self):
         cdef object result
         cdef Py_ssize_t length = self.capacity
 
@@ -215,13 +254,29 @@ cdef class CompactUnicodeBuilder(InplaceBuilder):
         return result
 
 
+@final
 @auto_pickle(False)
 cdef class Ucs1Builder(CompactUnicodeBuilder):
     def __cinit__(Ucs1Builder self):
         self.itemsize = 1
         self.format = b'B'
 
-    def release(Ucs1Builder self):
+    cpdef unicode release(Ucs1Builder self):
+        '''
+        Finish the string creation and return the :class:`~str` object.
+
+        Warning
+        -------
+            This function does not check the validility of the buffer.
+            If the buffer is not valid, then there may be errors in functions using this string.
+
+            Test :func:`~Ucs1Builder.valid()` if you want to make sure that the data is sane.
+
+        Returns
+        -------
+        str
+            The created Latin-1 string
+        '''
         cdef object result
         if (self.capacity == 0) or (self.memory is NULL):
             return EMPTY_UNICODE
@@ -231,29 +286,48 @@ cdef class Ucs1Builder(CompactUnicodeBuilder):
 
         return result
 
-    def is_invalid(Ucs1Builder self):
+    cpdef BuilderValid valid(Ucs1Builder self):
+        '''
+        A :class:`~Ucs1Builder` buffer is valid if it is empty or some data is `>0x7F`.
+        '''
         cdef Py_UCS1 *pos = <Py_UCS1*> ((<uint8_t*> self.memory) + START_ASCII)
         cdef Py_ssize_t index
 
-        if self.capacity <= 0:
-            return False
+        if (self.capacity == 0) or (self.memory is NULL):
+            return EMPTY
 
         for index in range(self.capacity):
             if pos[index] >= 0x80:
-                return True
+                return VALID
 
-        return 'All characters are in ASCII range'
+        return RANGE_UNUSED
 
 
+@final
 @auto_pickle(False)
 cdef class Ucs2Builder(CompactUnicodeBuilder):
     def __cinit__(Ucs2Builder self):
         self.itemsize = 2
         self.format = b'H'
-        self._get = Ucs2Builder.__get
-        self._set = Ucs2Builder.__set
+        self._get = _get2
+        self._set = _set2
 
-    def release(Ucs2Builder self):
+    cpdef unicode release(Ucs2Builder self):
+        '''
+        Finish the string creation and return the :class:`~str` object.
+
+        Warning
+        -------
+            This function does not check the validility of the buffer.
+            If the buffer is not valid, then there may be errors in functions using this string.
+
+            Test :func:`~Ucs2Builder.valid()` if you want to make sure that the data is sane.
+
+        Returns
+        -------
+        str
+            The created UCS-2 string
+        '''
         cdef object result
         if (self.capacity == 0) or (self.memory is NULL):
             return EMPTY_UNICODE
@@ -263,37 +337,48 @@ cdef class Ucs2Builder(CompactUnicodeBuilder):
 
         return result
 
-    @staticmethod
-    cdef void __set(void *ptr, Py_ssize_t value):
-        (<uint16_t*> ptr)[0] = <uint16_t> value
-
-    @staticmethod
-    cdef Py_ssize_t __get(void *ptr):
-        return (<uint16_t*> ptr)[0]
-
-    def is_invalid(Ucs2Builder self):
+    cpdef BuilderValid valid(Ucs2Builder self):
+        '''
+        A :class:`~Ucs2Builder` buffer is valid if it is empty or some data is `>0xFF`.
+        '''
         cdef Py_UCS2 *pos = <Py_UCS2*> ((<uint8_t*> self.memory) + START_ASCII)
         cdef Py_ssize_t index
 
-        if self.capacity <= 0:
-            return False
+        if (self.capacity == 0) or (self.memory is NULL):
+            return EMPTY
 
         for index in range(self.capacity):
             if pos[index] >= 0x100:
-                return True
+                return VALID
 
-        return False
+        return RANGE_UNUSED
 
 
+@final
 @auto_pickle(False)
 cdef class Ucs4Builder(CompactUnicodeBuilder):
     def __cinit__(Ucs4Builder self):
         self.itemsize = 4
         self.format = b'I'
-        self._get = Ucs4Builder.__get
-        self._set = Ucs4Builder.__set
+        self._get = _get4
+        self._set = _set4
 
-    def release(Ucs4Builder self):
+    cpdef unicode release(Ucs4Builder self):
+        '''
+        Finish the string creation and return the :class:`~str` object.
+
+        Warning
+        -------
+            This function does not check the validility of the buffer.
+            If the buffer is not valid, then there may be errors in functions using this string.
+
+            Test :func:`~Ucs4Builder.valid()` if you want to make sure that the data is sane.
+
+        Returns
+        -------
+        str
+            The created UCS-4 string
+        '''
         cdef object result
         if (self.capacity == 0) or (self.memory is NULL):
             return EMPTY_UNICODE
@@ -303,28 +388,30 @@ cdef class Ucs4Builder(CompactUnicodeBuilder):
 
         return result
 
-    @staticmethod
-    cdef void __set(void *ptr, Py_ssize_t value):
-        (<uint32_t*> ptr)[0] = <uint32_t> value
-
-    @staticmethod
-    cdef Py_ssize_t __get(void *ptr):
-        return (<uint32_t*> ptr)[0]
-
-    def is_invalid(Ucs4Builder self):
+    cpdef BuilderValid valid(Ucs4Builder self):
+        '''
+        A :class:`~Ucs4Builder` buffer is valid if it is empty or no data is `>0x10_FFFF` and some data is `>0xFFFF`.
+        '''
         cdef Py_UCS4 *pos = <Py_UCS4*> ((<uint8_t*> self.memory) + START_ASCII)
         cdef Py_ssize_t index
 
-        if self.capacity <= 0:
-            return False
+        if (self.capacity == 0) or (self.memory is NULL):
+            return EMPTY
 
         for index in range(self.capacity):
-            if pos[index] >= 0x10000:
-                return True
+            if pos[index] >= 0x1_0000:
+                break
+        else:
+            return RANGE_UNUSED
 
-        return False
+        for index in range(index, self.capacity):
+            if pos[index] >= 0x11_0000:
+                return RANGE_EXCEEDED
+        else:
+            return VALID
 
 
+@final
 @auto_pickle(False)
 cdef class BytesBuilder(InplaceBuilder):
     def __cinit__(BytesBuilder self):
@@ -332,7 +419,15 @@ cdef class BytesBuilder(InplaceBuilder):
         self.itemsize = 1
         self.format = b'B'
 
-    def release(BytesBuilder self):
+    cpdef bytes release(BytesBuilder self):
+        '''
+        Finish the bytes creation and return the :class:`~bytes` object.
+
+        Returns
+        -------
+        bytes
+            The created string.
+        '''
         cdef object result
         cdef Py_ssize_t length = self.capacity
 
@@ -350,5 +445,11 @@ cdef class BytesBuilder(InplaceBuilder):
 
         return result
 
-    def is_invalid(BytesBuilder self):
-        return False
+    cpdef BuilderValid valid(BytesBuilder self):
+        '''
+        There is no need to test if a :class:`~BytesBuilder` buffer is valid. It is always valid.
+        '''
+        if (self.capacity == 0) or (self.memory is NULL):
+            return EMPTY
+        else:
+            return ALWAYS

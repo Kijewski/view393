@@ -11,9 +11,8 @@ def get_text(name):
 
 
 extra_compile_args = [
-    '-std=c++11', '-Wall', '-Wextra', '-Werror',
-    '-Wno-error=ignored-qualifiers', '-Wno-error=cast-function-type',
-    '-Os', '-fomit-frame-pointer', '-fPIC', '-ggdb1', '-pipe',
+    '-std=c++11',
+    '-Os', '-fomit-frame-pointer', '-fPIC', '-g0', '-pipe',
     '-D_FORTIFY_SOURCE=2', '-fstack-protector-strong', '--param=ssp-buffer-size=8',
 ]
 
@@ -27,7 +26,7 @@ name = 'view393'
 
 setup(
     name=name,
-    version=eval(get_text('lib/VERSION')),
+    version=eval(get_text(name + '/VERSION')),
     long_description=get_text('README.rst'),
     description='Some helper functions to inspect :class:`str` objects in Python 3.3 and later.',
     author='René Kijewski',
@@ -38,7 +37,7 @@ setup(
     python_requires='~= 3.3',
     zip_safe=False,
     ext_modules=[Extension(
-        name,
+        name + '/__init__',
         sources=[name + '.pyx'],
         include_dirs=['lib'],
         extra_compile_args=extra_compile_args,
@@ -55,4 +54,6 @@ setup(
         'Programming Language :: Python :: Implementation :: CPython',
         'Topic :: Text Processing',
     ],
+    packages=[name],
+    package_data={name: ['__init__.pxd']},
 )

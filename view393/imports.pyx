@@ -1,10 +1,9 @@
-from cpython cimport Py_buffer, PyObject, int as PythonInt
+from cpython cimport Py_buffer, PyObject, int as PythonInt, bool as PythonBool
 from cpython.long cimport PyLong_AsUnsignedLongMask
-from cython cimport final, no_gc, auto_pickle
-from libcpp cimport bool as boolean
+from cython cimport final, no_gc, auto_pickle, internal
 
 
-cdef extern from 'native.hpp' namespace 'View393' nogil:
+cdef extern from 'view393/native.hpp' namespace 'View393' nogil:
     const char VERSION[]
     const char LONGDESCRIPTION[]
     enum:
@@ -16,18 +15,6 @@ cdef extern from 'native.hpp' namespace 'View393' nogil:
 
 cdef extern from '<cstddef>' namespace 'std' nogil:
     ctypedef unsigned long size_t
-
-
-cdef extern from '<cstdint>' namespace 'std' nogil:
-    ctypedef unsigned char uint8_t
-    ctypedef unsigned short uint16_t
-    ctypedef unsigned long uint32_t
-    ctypedef unsigned long long uint64_t
-
-    ctypedef signed char int8_t
-    ctypedef signed short int16_t
-    ctypedef signed long int32_t
-    ctypedef signed long long int64_t
 
 
 cdef extern from 'Python.h':

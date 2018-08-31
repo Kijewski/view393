@@ -4,13 +4,14 @@ NAME := view393
 
 .PHONY: all sdist bdist_wheel clean docs
 
-FILES := Makefile MANIFEST.in ${NAME}.pyx README.rst setup.py \
-         lib/native.hpp lib/VERSION lib/DESCRIPTION
+FILES := Makefile MANIFEST.in setup.py
+FILES += ${NAME}.pyx ${NAME}.pxd ${NAME}/native.hpp
+FILES += README.rst ${NAME}/VERSION ${NAME}/DESCRIPTION
 
-${NAME}.cpp: ${NAME}.pyx $(wildcard lib/*.pyx)
+${NAME}.cpp: ${NAME}.pyx ${NAME}.pxd $(wildcard ${NAME}/*.pyx) Makefile
 	rm -f -- dist/*.so ${NAME}.cpp
 	rm -f ./${NAME}.cpp
-	cythonize $<
+	cythonize --force $<
 
 sdist: ${NAME}.cpp ${FILES}
 	rm -f -- dist/${NAME}-*.tar.gz
